@@ -30,13 +30,13 @@ class ScihubCrawler(BaseCrawler, BaseTaskStep):
 
     def crawl(self) -> HtmlContent:
         try:
-            request_params = {
-                'request': self.source[self.source.type]
-            }
+            # Build direct URL: https://sci-hub.xx/{identifier}
+            identifier = self.source[self.source.type]
+            url = f"{self.scihub_url.rstrip('/')}/{identifier}"
             proxies = self.task.context.get('proxies', {}) if self.task is not None else {}
-            logger.info(f"<- Request: scihub_url={self.scihub_url}, source={self.source}, proxies={proxies}")
+            logger.info(f"<- Request: url={url}, source={self.source}, proxies={proxies}")
 
-            res = self.sess.post(self.scihub_url, data=request_params, proxies=proxies)
+            res = self.sess.get(url, proxies=proxies)
             logger.info(f"-> Response: status_code={res.status_code}, content_length={len(res.content.decode())}")
 
             if res.status_code not in ScihubCrawler.OK_STATUS_CODES:

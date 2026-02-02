@@ -100,11 +100,20 @@ class HtmlPdfExtractor(BaseExtractor, BaseTaskStep):
         """Extract title from html content."""
         soup = BeautifulSoup(self.content.content, self._parser)
         soup_title = soup.title
-        if soup_title is None or len(soup_title.text) == 0 \
-                or '|' not in soup_title.text:
+        if soup_title is None or len(soup_title.text) == 0:
             title = ""
         else:
-            title = soup.title.text.split('|')[1]
+            title_text = soup_title.text
+            # New format: "Sci-Hub. Title / Journal, Year"
+            if '. ' in title_text and ' / ' in title_text:
+                start = title_text.find('. ') + 2
+                end = title_text.rfind(' /')
+                title = title_text[start:end] if end > start else ""
+            # Old format: "Something | Title | DOI"
+            elif '|' in title_text:
+                title = title_text.split('|')[1]
+            else:
+                title = ""
         return self._clean_title(title)
 
     @staticmethod
