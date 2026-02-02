@@ -30,6 +30,9 @@ class DoiSource(BaseSource):
 
         for proto in DoiSource.DOI_PROTOCOLS:
             doi = doi.replace(proto, "")
+        # Also strip doi.org/ prefix if present
+        if doi.startswith("doi.org/"):
+            doi = doi[8:]
         return doi
 
     @staticmethod
