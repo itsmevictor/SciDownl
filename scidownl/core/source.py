@@ -1,5 +1,6 @@
 # -*- encoding: utf-8 -*-
 """Source implementations."""
+import re
 from typing import Union
 
 from .base import BaseSource
@@ -10,6 +11,7 @@ class DoiSource(BaseSource):
     """A DOI source dict."""
 
     DOI_PROTOCOLS = ["http://", "https://"]
+    DOI_PATTERN = re.compile(r'(10\.\d{4,9}/[^\s?#]+)')
 
     def __init__(self, doi: str):
         super().__init__()
@@ -28,9 +30,13 @@ class DoiSource(BaseSource):
         if len(doi) == 0:
             raise EmptyDoiException("Empty doi is given")
 
+        match = DoiSource.DOI_PATTERN.search(doi)
+        if match:
+            return match.group(1)
+
+        # Fallback for inputs without a recognizable DOI pattern
         for proto in DoiSource.DOI_PROTOCOLS:
             doi = doi.replace(proto, "")
-        # Also strip doi.org/ prefix if present
         if doi.startswith("doi.org/"):
             doi = doi[8:]
         return doi

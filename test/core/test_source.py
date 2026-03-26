@@ -23,19 +23,43 @@ class TestSource(unittest.TestCase):
         cases = {
             'http_doi': 'http://doi.org/10.1145/1327452.1327492',
             'https_doi': 'https://doi.org/10.1145/1327452.1327492',
-            'raw_doi': 'doi.org/10.1145/1327452.1327492'
+            'raw_doi': 'doi.org/10.1145/1327452.1327492',
+            'bare_doi': '10.1145/1327452.1327492',
         }
+        expected_doi = "10.1145/1327452.1327492"
+
         doi_source = DoiSource(cases.get('http_doi'))
-        self.assertEqual("doi.org/10.1145/1327452.1327492", doi_source.get_doi())
+        self.assertEqual(expected_doi, doi_source.get_doi())
         self.assertEqual("http", doi_source.get_protocol())
 
         doi_source = DoiSource(cases.get('https_doi'))
-        self.assertEqual("doi.org/10.1145/1327452.1327492", doi_source.get_doi())
+        self.assertEqual(expected_doi, doi_source.get_doi())
         self.assertEqual("https", doi_source.get_protocol())
 
         doi_source = DoiSource(cases.get('raw_doi'))
-        self.assertEqual("doi.org/10.1145/1327452.1327492", doi_source.get_doi())
+        self.assertEqual(expected_doi, doi_source.get_doi())
         self.assertEqual("https", doi_source.get_protocol())
+
+        doi_source = DoiSource(cases.get('bare_doi'))
+        self.assertEqual(expected_doi, doi_source.get_doi())
+        self.assertEqual("https", doi_source.get_protocol())
+
+    def test_doi_extraction_from_publisher_urls(self):
+        """DOIs should be extracted from arbitrary publisher URLs."""
+        cases = {
+            'https://onlinelibrary.wiley.com/doi/abs/10.1111/ajps.12185':
+                '10.1111/ajps.12185',
+            'https://www.sciencedirect.com/science/article/pii/S0003347209005806/10.1016/j.anbehav.2009.12.007':
+                '10.1016/j.anbehav.2009.12.007',
+            'https://link.springer.com/article/10.1007/s11269-006-9105-4':
+                '10.1007/s11269-006-9105-4',
+            'https://journals.sagepub.com/doi/10.1177/0956797611421206':
+                '10.1177/0956797611421206',
+        }
+        for url, expected_doi in cases.items():
+            with self.subTest(url=url):
+                doi_source = DoiSource(url)
+                self.assertEqual(expected_doi, doi_source.get_doi())
 
     def test_create_pmid_source(self):
         # Empty case: PMID is None.
