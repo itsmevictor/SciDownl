@@ -1,11 +1,10 @@
 # -*- encoding: utf-8 -*-
 """Downloader implementation."""
 import os
-import sys
-
-import requests
+import tempfile
 
 from .base import BaseDownloader, BaseTask, BaseTaskStep
+from .http import create_session, REQUEST_TIMEOUT
 from .information import UrlInformation
 from ..log import get_logger
 from ..exception import DownloadException
@@ -15,57 +14,61 @@ logger = get_logger()
 
 
 class UrlDownloader(BaseDownloader, BaseTaskStep):
-    """Downloader of url."""
+    """Download a PDF, preserving an existing file if the request fails."""
 
     def __init__(self, information: UrlInformation, task: BaseTask = None):
         BaseDownloader.__init__(self, information)
         BaseTaskStep.__init__(self, task)
-        self.information = information
-        self.task = task
         self.service = ScihubUrlService()
         if self.task is not None:
             self.task.context['status'] = 'downloading'
 
     def download(self, out: str) -> str:
-        """Download a url to out"""
+        context = self.task.context if self.task is not None else {}
+        session = context.get('session')
+        owns_session = session is None
+        if owns_session:
+            session = create_session()
+        temporary_path = None
         try:
-            url = self.information.get_url()
-            proxies = self.task.context.get('proxies', {}) if self.task is not None else {}
-            res = requests.get(url, stream=True, proxies=proxies)
-            total_length = res.headers.get('content-length')
-
-            with open(out, "wb") as f:
-                if total_length is None:
-                    # no content length header
-                    f.write(res.content)
-                else:
-                    download_length = 0
-                    total_length = int(total_length)
-                    bar_width = 50
-                    for data in res.iter_content(chunk_size=4096):
-                        download_length += len(data)
-                        f.write(data)
-                        done_width = int(bar_width * download_length / total_length)
-                        perc = int(100 * download_length / total_length)
-                        sys.stdout.write("\r%3d%% [%s%s] %s/%s"
-                                         % (perc, '=' * done_width,
-                                            ' ' * (bar_width - done_width),
-                                            download_length, total_length))
-                        sys.stdout.flush()
-                    sys.stdout.write('\n')
-                    sys.stdout.flush()
-            _, filename = os.path.split(out)
-            logger.info(f"↓ Successfully download the url to: {out}")
-
+            headers = {}
+            if context.get('page_url'):
+                headers['Referer'] = context['page_url']
+            with session.get(self.information.get_url(), stream=True,
+                             proxies=context.get('proxies', {}), headers=headers,
+                             timeout=REQUEST_TIMEOUT) as response:
+                response.raise_for_status()
+                chunks = response.iter_content(chunk_size=65536)
+                first_chunk = next((chunk for chunk in chunks if chunk), b'')
+                if not first_chunk.lstrip().startswith(b'%PDF-'):
+                    raise ValueError(
+                        'The server returned an empty response or a non-PDF page '
+                        '(possibly a robot verification page). Try another mirror '
+                        'with --scihub-url.')
+                with tempfile.NamedTemporaryFile(dir=os.path.dirname(os.path.abspath(out)),
+                                                 prefix='.scidownl-', suffix='.part',
+                                                 delete=False) as output:
+                    temporary_path = output.name
+                    output.write(first_chunk)
+                    for chunk in chunks:
+                        output.write(chunk)
+            os.replace(temporary_path, out)
+            temporary_path = None
+            filename = os.path.basename(out)
+            logger.info(f"↓ Successfully downloaded the PDF to: {out}")
             if self.task is not None:
-                self.task.context['out'] = out
-                self.task.context['filename'] = filename
-        except Exception as e:
+                context['out'] = out
+                context['filename'] = filename
+                context['status'] = 'downloaded'
+            return filename
+        except Exception as error:
             if self.task is not None:
-                self.task.context['status'] = 'downloading_failed'
-                self.task.context['error'] = e
-                scihub_url = self.task.context.get('referer', None)
-                self.service.increment_failed_times(scihub_url)
-            raise DownloadException(f"Error occurs when downloading {e}")
-        return filename
-
+                context['status'] = 'downloading_failed'
+                context['error'] = error
+                self.service.increment_failed_times(context.get('referer'))
+            raise DownloadException(f"Error downloading PDF: {error}") from error
+        finally:
+            if temporary_path is not None:
+                os.unlink(temporary_path)
+            if owns_session:
+                session.close()

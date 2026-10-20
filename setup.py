@@ -21,6 +21,7 @@ setuptools.setup(
     packages=setuptools.find_packages(exclude=["test.*", "test"]),
     include_package_data=True,
     install_requires=install_requires,
+    extras_require={'browser': ['selenium>=4.10']},
     entry_points={
         'console_scripts': [
             'scidownl=scidownl.api.cli:cli'

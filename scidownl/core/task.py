@@ -12,6 +12,7 @@ from .updater import CrawlingScihubDomainUpdater
 from ..log import get_logger
 from ..config import get_config
 from ..db.service import ScihubUrlService
+from ..exception import DownloadException
 
 logger = get_logger()
 configs = get_config()
@@ -28,7 +29,8 @@ class ScihubTask(BaseTask):
                  scihub_url: str = None,
                  scihub_url_chooser_cls=default_chooser_cls,
                  out: str = None,
-                 proxies: dict = None):
+                 proxies: dict = None,
+                 browser: bool = False):
         super().__init__()
         self.source_keyword = source_keyword
         self.scihub_url_chooser_cls = scihub_url_chooser_cls
@@ -39,6 +41,7 @@ class ScihubTask(BaseTask):
         self.proxies = proxies or {}
         self.context['status'] = 'initialized'
         self.context['proxies'] = self.proxies
+        self.context['browser'] = browser
         self.service = ScihubUrlService()
         self.updater = CrawlingScihubDomainUpdater()
 
@@ -47,38 +50,55 @@ class ScihubTask(BaseTask):
             logger.info(f"Choose the scihub url: {self.scihub_url}")
             return self._run(self.scihub_url)
 
-        # Update scihub domains if empty.
-        if len(self.scihub_url_chooser) == 0:
+        preferred_urls = configs['scihub.task'].get('preferred_urls', '').split()
+        # Keep a usable configured mirror even if domain discovery is unavailable.
+        if len(self.scihub_url_chooser) == 0 and not preferred_urls:
             self.updater.update_domains()
             self.scihub_url_chooser = self.scihub_url_chooser_cls()
 
-        for i, scihub_url in enumerate(self.scihub_url_chooser):
+        urls = dict.fromkeys(preferred_urls + [item.url for item in self.scihub_url_chooser])
+        errors = []
+        for i, scihub_url in enumerate(urls):
             try:
-                logger.info(f"Choose scihub url [{i}]: {scihub_url.url}")
-                return self._run(scihub_url.url)
+                logger.info(f"Choose scihub url [{i}]: {scihub_url}")
+                return self._run(scihub_url)
             except Exception as e:
-                logger.warning(f"Error occurs, task status: {self.context['status']}, error: {self.context['error']}")
-                continue
-        logger.error(f"Failed to download the paper: {self.source_keyword}. Please try again.")
+                self.context['error'] = e
+                errors.append(f"{scihub_url}: {e}")
+                logger.warning(f"Mirror failed: {scihub_url}: {e}")
+        self.context['status'] = 'failed'
+        error = DownloadException(
+            f"Failed to download {self.source_keyword}. " + ('; '.join(errors) or 'No mirrors available.'))
+        self.context['error'] = error
+        raise error
 
     def _run(self, scihub_url):
         source = self.source_class(self.source_keyword)
         crawler = ScihubCrawler(source, scihub_url, self)
+        try:
+            return self._download(crawler)
+        finally:
+            crawler.sess.close()
+            self.context.pop('session', None)
+
+    def _download(self, crawler):
         content = crawler.crawl()
 
         extractor = HtmlPdfExtractor(content, self)
         pdf_url_title_info = extractor.extract()
+        title = pdf_url_title_info['title'] or HtmlPdfExtractor._clean_title(self.source_keyword) or 'paper'
 
         if self.out is None:
             # Using title as the filename and save to current directory.
-            out = pdf_url_title_info['title'] + '.pdf'
+            out = title + '.pdf'
         else:
             dirpath, filename = os.path.split(self.out)
             if dirpath != '' and not os.path.exists(dirpath):
                 os.makedirs(dirpath)
-            if len(filename) == 0:
-                filename = pdf_url_title_info['title'] + '.pdf'
-            if not filename.endswith("pdf") and not filename.endswith("PDF"):
+            if len(filename) == 0 or os.path.isdir(self.out):
+                dirpath = self.out
+                filename = title + '.pdf'
+            if not filename.lower().endswith('.pdf'):
                 filename += '.pdf'
             out = os.path.join(dirpath, filename)
 
@@ -86,3 +106,6 @@ class ScihubTask(BaseTask):
         downloader.download(out)
         scihub_url = self.context.get('referer', None)
         self.service.increment_success_times(scihub_url)
+        self.context['status'] = 'succeeded'
+        self.context.pop('error', None)
+        return out

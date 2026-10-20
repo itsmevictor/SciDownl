@@ -23,6 +23,38 @@ $ scidownl download --title "ImageNet Classification with Deep Convolutional Neu
 $ scidownl download --pmid 31395057 --out ./paper/paper-1.pdf --proxy http=socks5://127.0.0.1:7890
 ```
 
+# Download reliability and robot checks
+
+Automatic downloads first try the mirrors in `preferred_urls` under `[scihub.task]`
+in the global config, then the saved mirrors in availability order. The defaults
+are `https://sci-hub.ru` followed by `https://sci-hub.fr`. Use `scidownl config --location` to find
+the config file; multiple preferred URLs can be separated by whitespace.
+`domain.list` shows the saved database entries, which are separate from this setting.
+An explicit `--scihub-url` uses only that mirror:
+
+```bash
+scidownl download -d 10.1017/S0003055416000745 -u https://sci-hub.fr
+```
+
+The article and PDF requests share cookies and use the final article URL as the
+PDF's referer. Downloads support multiple page layouts, use timeouts and limited
+retries, and check the PDF signature before saving. Failed or interrupted requests
+leave existing files intact. If every mirror fails, the command exits with a
+nonzero status; batch downloads still attempt the remaining papers.
+
+An HTTP 200 response can still contain a robot verification page. Such a response
+is rejected instead of being saved as a PDF. For interactive checks, add
+`--browser`. Chrome opens when verification is required; complete the check
+there, and the command resumes using the browser's cookies. The window closes
+automatically after the article loads. This mode requires Chrome and the optional
+Selenium dependency (install from this project with
+`python3 -m pip install -e '.[browser]'`). It uses a separate temporary browser
+session and does not read your existing Chrome profile.
+
+```bash
+scidownl download -d 10.1017/S0003055416000745 --browser
+```
+
 # Installation
 
 ## Install with pip

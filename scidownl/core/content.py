@@ -2,6 +2,18 @@
 """Content implementations."""
 
 from .base import BaseContent
+from bs4 import BeautifulSoup
+
+
+def is_verification_page(html):
+    soup = BeautifulSoup(html, 'html.parser')
+    if soup.select_one('meta[name="citation_pdf_url"], div.pdf object, embed#pdf, iframe#pdf, '
+                       'object[type="application/pdf"], embed[type="application/pdf"]'):
+        return False
+    title = soup.title.get_text(' ', strip=True).lower() if soup.title else ''
+    return ('are you a robot' in title or 'êtes-vous un robot' in title or 'just a moment' in title or
+            'checking your browser' in title or 'verify you are human' in title or
+            soup.select_one('#challenge-form, altcha-widget[challengeurl*="/captcha/challenge/"]') is not None)
 
 
 class HtmlContent(BaseContent):

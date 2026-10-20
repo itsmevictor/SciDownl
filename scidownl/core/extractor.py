@@ -1,11 +1,12 @@
 # -*- encoding: utf-8 -*-
 """Extractor implementations."""
 import re
+from urllib.parse import urljoin, urldefrag, urlsplit
 
 from bs4 import BeautifulSoup
 
 from .base import BaseExtractor, BaseInformation, BaseTask, BaseTaskStep
-from .content import HtmlContent
+from .content import HtmlContent, is_verification_page
 from .information import PdfUrlTitleInformation, UrlInformation
 from .chooser import scihub_url_choosers, AvailabilityFirstScihubUrlChooser
 from ..exception import PdfTagNotFoundException, PdfUrlNotFoundException, ExtractException
@@ -67,38 +68,42 @@ class HtmlPdfExtractor(BaseExtractor, BaseTaskStep):
 
     def _extract_url(self) -> str:
         raw_url = self._extract_raw_url()
-
-        for prefix in UrlInformation.PROTOCOL_PREFIXES:
-            if prefix in raw_url:
-                return raw_url
-
-        url = raw_url.split("#")[0]
-        if url.startswith("//"):
-            url = UrlInformation.DEFAULT_PROTOCOL_PREFIX + url[2:]
-        elif url.startswith("/"):
-            if self.task is None:
-                referer = HtmlPdfExtractor.DEFAULT_REFERER
-            else:
-                referer = self.task.context.get('referer', HtmlPdfExtractor.DEFAULT_REFERER)
-            url = referer + url
+        referer = self.DEFAULT_REFERER + '/'
+        if self.task is not None:
+            referer = self.task.context.get('page_url') or self.task.context.get('referer', referer)
+        url = urldefrag(urljoin(referer, raw_url.strip()))[0]
+        if urlsplit(url).scheme not in ('http', 'https'):
+            raise PdfUrlNotFoundException(f"Unsupported PDF URL: {url}")
         return url
 
     def _extract_raw_url(self) -> str:
         """Extract pdf url from html content."""
         soup = BeautifulSoup(self.content.content, self._parser)
-        pdf_tag = soup.select_one(self.pdf_tag_selector)
-        if pdf_tag is None:
-            raise PdfTagNotFoundException(f"No pdf tag was found in the given content "
-                                          f"with the selector: {self.pdf_tag_selector}")
-        raw_url = pdf_tag.attrs.get(self.pdf_tag_attr)
-        if raw_url is None:
-            raise PdfUrlNotFoundException(f"No pdf url was found in the pdf tag: {pdf_tag.get_text()} "
-                                          f"with the attr {self.pdf_tag_attr}")
-        return raw_url
+        selectors = [
+            (self.pdf_tag_selector, self.pdf_tag_attr),
+            ('meta[name="citation_pdf_url"]', 'content'),
+            ('embed#pdf, iframe#pdf, embed[type="application/pdf"]', 'src'),
+            ('object[type="application/pdf"], object#pdf', 'data'),
+            ('iframe[src*=".pdf"], embed[src*=".pdf"]', 'src'),
+            ('a[href*=".pdf"]', 'href'),
+        ]
+        for selector, attribute in selectors:
+            for tag in soup.select(selector):
+                raw_url = tag.get(attribute)
+                if raw_url and raw_url.strip():
+                    return raw_url
+        if is_verification_page(self.content.content):
+            raise PdfTagNotFoundException(
+                "Robot verification page received. This mirror requires verification "
+                "in a browser; use --browser or try another mirror with --scihub-url.")
+        raise PdfTagNotFoundException("No PDF link found on the article page")
 
     def _extract_title(self) -> str:
         """Extract title from html content."""
         soup = BeautifulSoup(self.content.content, self._parser)
+        citation_title = soup.select_one('meta[name="citation_title"]')
+        if citation_title is not None and citation_title.get('content', '').strip():
+            return self._clean_title(citation_title['content'])
         soup_title = soup.title
         if soup_title is None or len(soup_title.text) == 0:
             title = ""

@@ -9,8 +9,9 @@ def scihub_download(
         paper_type: str = 'doi',
         scihub_url: str = None,
         out: str = None,
-        proxies: dict = None
-    ) -> None:
+        proxies: dict = None,
+        browser: bool = False
+    ) -> str:
     """Download a paper from SciHub.
 
     :param keyword: a DOI or a PMID.
@@ -26,6 +27,8 @@ def scihub_download(
          /absolute/dir/paper.pdf, ../relative/dir/paper.pdf
         If None, paper will be downloaded to the current directory with the file
         name of the paper's title.
+    :param browser: Open Chrome for interactive robot verification when necessary.
+    :returns: The saved PDF path. Raises an exception if all mirrors fail.
     """
     proxies = proxies or {}
     return ScihubTask(
@@ -33,6 +36,7 @@ def scihub_download(
         source_type=paper_type,
         scihub_url=scihub_url,
         out=out,
-        proxies=proxies
+        proxies=proxies,
+        browser=browser
     ).run()
 

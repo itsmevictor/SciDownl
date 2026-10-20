@@ -97,17 +97,22 @@ def list_domains():
                    "If multiple DOIs or multiple PMIDs are provided, the --out option is always considered "
                    "as the output directory, rather than the output file path.")
 @click.option("-u", "--scihub-url",
-              help="Scihub domain url. If not specified, automatically choose one from local saved domains. "
-                   "It's recommended to leave this option empty.")
+              help="Scihub domain url. If not specified, try configured preferred mirrors, then saved domains. "
+                   "Use this to select a working mirror explicitly.")
 @click.option("-x", "--proxy",
               help="Proxy with the format of SCHEME=PROXY_ADDRESS. e.g., --proxy http=http://127.0.0.1:7890.")
+@click.option("--browser", is_flag=True,
+              help="Open Chrome when robot verification is required, then resume the download.")
 @click.help_option("-h", "--help")
-def download(doi, pmid, title, out, scihub_url, proxy: str):
+def download(doi, pmid, title, out, scihub_url, proxy: str, browser):
     """Download paper(s) by DOI or PMID."""
     from ..core.task import ScihubTask
     from ..config import get_config
 
     configs = get_config()
+
+    if not (doi or pmid or title):
+        raise click.UsageError('Provide at least one --doi, --pmid or --title.')
 
     logger.info("Run scihub tasks. Tasks information: ")
     if len(doi) > 0:
@@ -172,12 +177,16 @@ def download(doi, pmid, title, out, scihub_url, proxy: str):
             'out': out,
             'proxies': proxies
         })
+    failures = []
     for task_kwargs in tasks:
-        task = ScihubTask(**task_kwargs)
+        task = ScihubTask(**task_kwargs, browser=browser)
         try:
             task.run()
         except Exception as e:
-            logger.error(f"final status: {task.context['status']}, error: {task.context['error']}")
+            failures.append(task_kwargs['source_keyword'])
+            logger.error(str(e))
+    if failures:
+        raise click.ClickException(f"Failed to download: {', '.join(failures)}")
 
 
 if __name__ == '__main__':
